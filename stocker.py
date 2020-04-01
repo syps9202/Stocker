@@ -1,8 +1,11 @@
 # Quandl for financial analysis, pandas and numpy for data manipulation
 # fbprophet for additive models, #pytrends for Google trend data
+import quandl
 import pandas as pd
 import numpy as np
 import fbprophet
+import pytrends
+from pytrends.request import TrendReq
 
 # matplotlib pyplot for plotting
 import matplotlib.pyplot as plt
@@ -14,39 +17,44 @@ import matplotlib
 class Stocker():
     
     # Initialization requires a ticker symbol
-    def __init__(self, price):
-        self.symbol = 'the stock'
-        s = price
-        stock = pd.DataFrame({'Date':s.index, 'y':s, 'ds':s.index, 'close':s,'open':s}, index=None)
-
-        if ('Adj. Close' not in stock.columns):
-            stock['Adj. Close'] = stock['close']
-            stock['Adj. Open'] = stock['open']
+    def __init__(self, stockNo, dataframe):
         
+        
+        # Symbol is used for labeling plots
+        self.symbol = "stockNo : {}".format(stockNo)
+        
+
+        stock = dataframe
+        self.test_stock = dataframe.copy()
+        
+        # Columns required for prophet
+        stock['ds'] = stock['Date']
+        stock['Adj. Close'] = stock['Close']
+        stock['Adj. Open'] = stock['Open']
         stock['y'] = stock['Adj. Close']
         stock['Daily Change'] = stock['Adj. Close'] - stock['Adj. Open']
         
         # Data assigned as class attribute
-        self.stock = stock.copy()
-        
+        self.stock = dataframe.copy()
+#==============================================================================#
         # Minimum and maximum date in range
-        self.min_date = min(stock['ds'])
-        self.max_date = max(stock['ds'])
+        self.min_date = min(stock['Date'])
+        self.max_date = max(stock['Date'])
         
         # Find max and min prices and dates on which they occurred
         self.max_price = np.max(self.stock['y'])
         self.min_price = np.min(self.stock['y'])
         
-        self.min_price_date = self.stock[self.stock['y'] == self.min_price]['ds']
+        self.min_price_date = self.stock[self.stock['y'] == self.min_price]['Date']
         self.min_price_date = self.min_price_date[self.min_price_date.index[0]]
-        self.max_price_date = self.stock[self.stock['y'] == self.max_price]['ds']
+        self.max_price_date = self.stock[self.stock['y'] == self.max_price]['Date']
         self.max_price_date = self.max_price_date[self.max_price_date.index[0]]
         
         # The starting price (starting with the opening price)
-        self.starting_price = float(self.stock.ix[0, 'Adj. Open'])
+        self.starting_price = float(self.stock.loc[0, 'Adj. Open'])
         
         # The most recent price
-        self.most_recent_price = float(self.stock.ix[len(self.stock) - 1, 'y'])
+        self.most_recent_price = float(self.stock.loc[self.stock.index[-1], 'y'])
 
         # Whether or not to round dates
         self.round_dates = True
@@ -187,7 +195,7 @@ class Stocker():
 
             # Dates are not rounded
             trim_df = df[(df['Date'] >= start_date) & 
-                         (df['Date'] <= end_date)]
+                         (df['Date'] <= end_date.date)]
 
         
             
@@ -222,7 +230,7 @@ class Stocker():
             
             print('Maximum {} = {:.2f} on {}.'.format(stat, stat_max, date_stat_max))
             print('Minimum {} = {:.2f} on {}.'.format(stat, stat_min, date_stat_min))
-            print('Current {} = {:.2f} on {}.\n'.format(stat, self.stock.ix[len(self.stock) - 1, stat], self.max_date.date()))
+            print('Current {} = {:.2f} on {}.\n'.format(stat, self.stock.loc[self.stock.index[-1], stat], self.max_date))
             
             # Percentage y-axis
             if plot_type == 'pct':
@@ -245,7 +253,7 @@ class Stocker():
             elif plot_type == 'basic':
                 plt.style.use('fivethirtyeight');
                 plt.plot(stock_plot['Date'], stock_plot[stat], color = colors[i], linewidth = 3, label = stat, alpha = 0.8)
-                plt.xlabel('Date'); plt.ylabel('US $'); plt.title('%s Stock History' % self.symbol); 
+                plt.xlabel('Date'); plt.ylabel('Price'); plt.title('%s Stock History' % self.symbol); 
                 plt.legend(prop={'size':10})
                 plt.grid(color = 'k', alpha = 0.4); 
       
@@ -257,7 +265,7 @@ class Stocker():
     def reset_plot():
         
         # Restore default parameters
-        matplotlib.rcParams.update(matplotlib.rcParamsDefault)
+        matplotlib.rcdefaults()
         
         # Adjust a few parameters to liking
         matplotlib.rcParams['figure.figsize'] = (8, 5)
@@ -358,8 +366,7 @@ class Stocker():
     def changepoint_prior_analysis(self, changepoint_priors=[0.001, 0.05, 0.1, 0.2], colors=['b', 'r', 'grey', 'gold']):
     
         # Training and plotting with specified years of data
-        train = self.stock[(self.stock['Date'] > (max(self.stock['Date']
-                                                     ) - pd.DateOffset(years=self.training_years)))]
+        train = self.stock[(self.stock['Date'] > (max(self.stock['Date']) - pd.DateOffset(years=self.training_years)))]
         
         # Iterate through all the changepoints and make models
         for i, prior in enumerate(changepoint_priors):
@@ -407,7 +414,7 @@ class Stocker():
                             
         # Plot labels
         plt.legend(loc = 2, prop={'size': 10})
-        plt.xlabel('Date'); plt.ylabel('Stock Price ($)'); plt.title('Effect of Changepoint Prior Scale');
+        plt.xlabel('Date'); plt.ylabel('Stock Price'); plt.title('Effect of Changepoint Prior Scale');
         plt.show()
             
     # Basic prophet model for specified number of days  
@@ -418,8 +425,7 @@ class Stocker():
         model = self.create_model()
         
         # Fit on the stock history for self.training_years number of years
-        stock_history = self.stock[self.stock['Date'] > (self.max_date - 
-                                                         pd.DateOffset(years = self.training_years))]
+        stock_history = self.stock[self.stock['Date'] > (self.max_date - pd.DateOffset(years = self.training_years))]
         
         if resample:
             stock_history = self.resample(stock_history)
@@ -433,7 +439,7 @@ class Stocker():
         if days > 0:
             # Print the predicted price
             print('Predicted Price on {} = ${:.2f}'.format(
-                future.ix[len(future) - 1, 'ds'], future.ix[len(future) - 1, 'yhat']))
+                future.loc[future.index[-1], 'ds'], future.loc[future.index[-1], 'yhat']))
 
             title = '%s Historical and Predicted Stock Price'  % self.symbol
         else:
@@ -453,7 +459,7 @@ class Stocker():
                        facecolor = 'g', edgecolor = 'k', linewidth = 1.4, label = 'Confidence Interval')
 
         # Plot formatting
-        plt.legend(loc = 2, prop={'size': 10}); plt.xlabel('Date'); plt.ylabel('Price $');
+        plt.legend(loc = 2, prop={'size': 10}); plt.xlabel('Date'); plt.ylabel('Price');
         plt.grid(linewidth=0.6, alpha = 0.6)
         plt.title(title);
         plt.show()
@@ -495,9 +501,9 @@ class Stocker():
         # Calculate the differences between consecutive measurements
         test['pred_diff'] = test['yhat'].diff()
         test['real_diff'] = test['y'].diff()
-        
+
         # Correct is when we predicted the correct direction
-        test['correct'] = (np.sign(test['pred_diff']) == np.sign(test['real_diff'])) * 1
+        test['correct'] = (np.sign(test['pred_diff'][1:]) == np.sign(test['real_diff'][1:])) * 1
         
         # Accuracy when we predict increase and decrease
         increase_accuracy = 100 * np.mean(test[test['pred_diff'] > 0]['correct'])
@@ -514,8 +520,8 @@ class Stocker():
         test['in_range'] = False
 
         for i in test.index:
-            if (test.ix[i, 'y'] < test.ix[i, 'yhat_upper']) & (test.ix[i, 'y'] > test.ix[i, 'yhat_lower']):
-                test.ix[i, 'in_range'] = True
+            if (test.loc[i, 'y'] < test.loc[i, 'yhat_upper']) & (test.loc[i, 'y'] > test.loc[i, 'yhat_lower']):
+                test.loc[i, 'in_range'] = True
 
         in_range_accuracy = 100 * np.mean(test['in_range'])
 
@@ -526,8 +532,8 @@ class Stocker():
                 end_date))
 
             # Final prediction vs actual value
-            print('\nPredicted price on {} = ${:.2f}.'.format(max(future['ds']), future.ix[len(future) - 1, 'yhat']))
-            print('Actual price on    {} = ${:.2f}.\n'.format(max(test['ds']), test.ix[len(test) - 1, 'y']))
+            print('\nPredicted price on {} = ${:.2f}.'.format(max(future['ds']), future.loc[future.index[-1], 'yhat']))
+            print('Actual price on    {} = ${:.2f}.\n'.format(max(test['ds']), test.loc[test.index[-1], 'y']))
 
             print('Average Absolute Error on Training Data = ${:.2f}.'.format(train_mean_error))
             print('Average Absolute Error on Testing  Data = ${:.2f}.\n'.format(test_mean_error))
@@ -561,7 +567,7 @@ class Stocker():
                        linestyles='dashed', label = 'Prediction Start')
 
             # Plot formatting
-            plt.legend(loc = 2, prop={'size': 8}); plt.xlabel('Date'); plt.ylabel('Price $');
+            plt.legend(loc = 2, prop={'size': 8}); plt.xlabel('Date'); plt.ylabel('Price');
             plt.grid(linewidth=0.6, alpha = 0.6)
                        
             plt.title('{} Model Evaluation from {} to {}.'.format(self.symbol,
@@ -583,20 +589,20 @@ class Stocker():
                 
                 # If we predicted up and the price goes up, we gain the difference
                 if correct == 1:
-                    prediction_profit.append(nshares * test_pred_increase.ix[i, 'real_diff'])
+                    prediction_profit.append(nshares * test_pred_increase.loc[i, 'real_diff'])
                 # If we predicted up and the price goes down, we lose the difference
                 else:
-                    prediction_profit.append(nshares * test_pred_increase.ix[i, 'real_diff'])
+                    prediction_profit.append(nshares * test_pred_increase.loc[i, 'real_diff'])
             
             test_pred_increase['pred_profit'] = prediction_profit
             
             # Put the profit into the test dataframe
             test = pd.merge(test, test_pred_increase[['ds', 'pred_profit']], on = 'ds', how = 'left')
-            test.ix[0, 'pred_profit'] = 0
+            test.loc[0, 'pred_profit'] = 0
         
             # Profit for either method at all dates
             test['pred_profit'] = test['pred_profit'].cumsum().ffill()
-            test['hold_profit'] = nshares * (test['y'] - float(test.ix[0, 'y']))
+            test['hold_profit'] = nshares * (test['y'] - float(test.loc[0, 'y']))
             
             # Display information
             print('You played the stock market in {} from {} to {} with {} shares.\n'.format(
@@ -607,7 +613,7 @@ class Stocker():
 
             # Display some friendly information about the perils of playing the stock market
             print('The total profit using the Prophet model = ${:.2f}.'.format(np.sum(prediction_profit)))
-            print('The Buy and Hold strategy profit =         ${:.2f}.'.format(float(test.ix[len(test) - 1, 'hold_profit'])))
+            print('The Buy and Hold strategy profit =         ${:.2f}.'.format(float(test.loc[test.index[-1], 'hold_profit'])))
             print('\nThanks for playing the stock market!\n')
             
            
@@ -616,11 +622,11 @@ class Stocker():
             self.reset_plot()
             
             # Final profit and final smart used for locating text
-            final_profit = test.ix[len(test) - 1, 'pred_profit']
-            final_smart = test.ix[len(test) - 1, 'hold_profit']
+            final_profit = test.loc[test.index[-1], 'pred_profit']
+            final_smart = test.loc[test.index[-1], 'hold_profit']
 
             # text location
-            last_date = test.ix[len(test) - 1, 'ds']
+            last_date = test.loc[test.index[-1], 'ds']
             text_location = (last_date - pd.DateOffset(months = 1))
 
             plt.style.use('dark_background')
@@ -648,7 +654,7 @@ class Stocker():
                     size = 18);
 
             # Plot formatting
-            plt.ylabel('Profit  (US $)'); plt.xlabel('Date'); 
+            plt.ylabel('Profit  (Price)'); plt.xlabel('Date'); 
             plt.title('Predicted versus Buy and Hold Profits');
             plt.legend(loc = 2, prop={'size': 10});
             plt.grid(alpha=0.2); 
@@ -700,7 +706,7 @@ class Stocker():
         for changepoint in (changepoints):
             change_indices.append(train[train['ds'] == changepoint].index[0])
         
-        c_data = train.ix[change_indices, :]
+        c_data = train.loc[change_indices, :]
         deltas = model.params['delta'][0]
         
         c_data['delta'] = deltas
@@ -720,7 +726,7 @@ class Stocker():
         if not search:
         
             print('\nChangepoints sorted by slope rate of change (2nd derivative):\n')
-            print(c_data.ix[:, ['Date', 'Adj. Close', 'delta']][:5])
+            print(c_data.loc[:, ['Date', 'Adj. Close', 'delta']][:5])
 
             # Line plot showing actual values, estimated values, and changepoints
             self.reset_plot()
@@ -739,7 +745,7 @@ class Stocker():
                        linewidth= 1.2, label='Positive Changepoints')
 
             plt.legend(prop={'size':10});
-            plt.xlabel('Date'); plt.ylabel('Price ($)'); plt.title('Stock Price with Changepoints')
+            plt.xlabel('Date'); plt.ylabel('Price'); plt.title('Stock Price with Changepoints')
             plt.show()
         
         # Search for search term in google news
@@ -801,8 +807,7 @@ class Stocker():
     def predict_future(self, days=30):
         
         # Use past self.training_years years for training
-        train = self.stock[self.stock['Date'] > (max(self.stock['Date']
-                                                    ) - pd.DateOffset(years=self.training_years))]
+        train = self.stock[self.stock['Date'] > (max(self.stock['Date']) - pd.DateOffset(years=self.training_years))]
         
         model = self.create_model()
         
@@ -865,7 +870,7 @@ class Stocker():
         # Plot formatting
         plt.legend(loc = 2, prop={'size': 10});
         plt.xticks(rotation = '45')
-        plt.ylabel('Predicted Stock Price (US $)');
+        plt.ylabel('Predicted Stock Price');
         plt.xlabel('Date'); plt.title('Predictions for %s' % self.symbol);
         plt.show()
         
@@ -903,7 +908,7 @@ class Stocker():
         
         # Iterate through all the changepoints and make models
         for i, prior in enumerate(changepoint_priors):
-            results.ix[i, 'cps'] = prior
+            results.loc[i, 'cps'] = prior
             
             # Select the changepoint
             self.changepoint_prior_scale = prior
@@ -920,16 +925,16 @@ class Stocker():
             avg_train_error = np.mean(abs(train_results['y'] - train_results['yhat']))
             avg_train_uncertainty = np.mean(abs(train_results['yhat_upper'] - train_results['yhat_lower']))
             
-            results.ix[i, 'train_err'] = avg_train_error
-            results.ix[i, 'train_range'] = avg_train_uncertainty
+            results.loc[i, 'train_err'] = avg_train_error
+            results.loc[i, 'train_range'] = avg_train_uncertainty
             
             # Testing results and metrics
             test_results = pd.merge(test, future[['ds', 'yhat', 'yhat_upper', 'yhat_lower']], on = 'ds', how = 'inner')
             avg_test_error = np.mean(abs(test_results['y'] - test_results['yhat']))
             avg_test_uncertainty = np.mean(abs(test_results['yhat_upper'] - test_results['yhat_lower']))
             
-            results.ix[i, 'test_err'] = avg_test_error
-            results.ix[i, 'test_range'] = avg_test_uncertainty
+            results.loc[i, 'test_err'] = avg_test_error
+            results.loc[i, 'test_range'] = avg_test_uncertainty
 
         print(results)
 
